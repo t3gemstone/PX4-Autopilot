@@ -69,10 +69,12 @@
 #define HRT_TIMER_RATE   25000000u     /* DMTimer input = HFOSC0 @ 25 MHz         */
 
 /* I2C ----------------------------------------------------------------------
- * Two buses exposed by the AM67 NuttX driver: MAIN I2C0 (-> PX4 bus 1) and
- * WKUP_I2C0 (-> PX4 bus 3). See src/i2c.cpp for the table and mapping.
+ * The only I2C bus enabled and wired on this board is WKUP_I2C0 (WKUP domain,
+ * 0x2b200000) -> PX4 bus 3. The AM67 also has MCU_I2C0 (MCU domain,
+ * 0x04900000 -> PX4 bus 1), but it carries no peripheral and is not built, so
+ * it is not listed. See src/i2c.cpp for the table and mapping.
  */
-#define PX4_NUMBER_I2C_BUSES   2
+#define PX4_NUMBER_I2C_BUSES   1
 
 /* Skip px4_platform_i2c_init()'s eager boot-time probe (a general-call software
  * reset transfer on every declared bus). It is unsafe here: (a) it does not

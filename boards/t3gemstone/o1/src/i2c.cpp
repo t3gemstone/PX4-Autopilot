@@ -37,20 +37,21 @@
  * Board-specific I2C bus configuration (the px4_i2c_buses table used by
  * platforms/common/i2c.cpp and PX4 I2C sensor drivers).
  *
- * The AM67 NuttX driver registers two buses (boards/.../src/am67_i2c.c):
- *   /dev/i2c0 = MAIN I2C0  (am67 port 0) -> PX4 bus 1
- *   /dev/i2c2 = WKUP_I2C0  (am67 port 2) -> PX4 bus 3
- * The PX4<->am67 mapping is px4_i2cbus_initialize(bus) =
- * am67_i2cbus_initialize(bus - PX4_BUS_OFFSET) in micro_hal.h.
+ * The AM67 NuttX driver can register MCU_I2C0 (am67 port 0, MCU domain
+ * 0x04900000) and WKUP_I2C0 (am67 port 2, WKUP domain 0x2b200000). The
+ * PX4<->am67 mapping is px4_i2cbus_initialize(bus) =
+ * am67_i2cbus_initialize(bus - PX4_BUS_OFFSET) in micro_hal.h, so PX4 bus 1 ->
+ * MCU_I2C0 and PX4 bus 3 -> WKUP_I2C0 (/dev/i2c2).
  *
- * Both are declared here so `i2cdetect -b {1,3}` and I2C sensor drivers can
- * use them. is_external is left false (internal) until the board's HAT vs.
- * on-board I2C split is confirmed against the schematic.
+ * Only WKUP_I2C0 is enabled and wired on this board; every I2C sensor lives
+ * there. MCU_I2C0 carries no peripheral and is not built (CONFIG_AM67_I2C0 is
+ * off), so it is intentionally omitted - listing it would make `i2cdetect -b 1`
+ * report an invalid/uninitialised bus. is_external is left false (internal)
+ * pending the board's HAT vs. on-board split.
  */
 
 #include <px4_platform_common/i2c.h>
 
 constexpr px4_i2c_bus_t px4_i2c_buses[I2C_BUS_MAX_BUS_ITEMS] = {
-	{ 1, false },   /* MAIN I2C0 (am67 port 0, /dev/i2c0) */
 	{ 3, false },   /* WKUP_I2C0 (am67 port 2, /dev/i2c2) */
 };
