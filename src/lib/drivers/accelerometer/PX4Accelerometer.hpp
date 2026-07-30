@@ -74,7 +74,9 @@ private:
 	uint32_t		_device_id{0};
 	const enum Rotation	_rotation;
 
-	int32_t			_imu_gyro_rate_max{0}; // match gyro max rate
+	// match gyro max rate; fallback used only when the IMU_GYRO_RATEMAX param
+	// does not exist (minimal boards) - see PX4Gyroscope.hpp.
+	int32_t			_imu_gyro_rate_max{400};
 
 	float			_range{16 * CONSTANTS_ONE_G};
 	float			_scale{1.f};

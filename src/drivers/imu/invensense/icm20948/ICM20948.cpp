@@ -417,6 +417,26 @@ void ICM20948::SelectRegisterBank(enum REG_BANK_SEL_BIT bank, bool force)
 		cmd_bank_sel[1] = bank;
 		transfer(cmd_bank_sel, cmd_bank_sel, sizeof(cmd_bank_sel));
 
+		// A REG_BANK_SEL write needs a settle before the next access. On a fast
+		// SPI master (the TI AM67 MCSPI toggles CS with almost no inter-transfer
+		// gap) the immediately following transfer can otherwise still target the
+		// previous bank - observed as BANK_0 reads returning the same-offset
+		// BANK_3 register value, failing configuration. A bare delay is not
+		// enough; the settle needs a real bus cycle. Issue a throw-away
+		// REG_BANK_SEL read-back, which supplies that inter-transfer gap AND
+		// confirms the bank actually switched (bits [5:4]); re-write and re-check
+		// a few times if not, so the switch is self-healing.
+		for (int i = 0; i < 3; i++) {
+			uint8_t rb[2] { (uint8_t)(static_cast<uint8_t>(Register::BANK_0::REG_BANK_SEL) | DIR_READ), 0 };
+			transfer(rb, rb, sizeof(rb));
+
+			if ((rb[1] & 0x30) == ((uint8_t)bank & 0x30)) {
+				break;
+			}
+
+			transfer(cmd_bank_sel, cmd_bank_sel, sizeof(cmd_bank_sel));
+		}
+
 		_last_register_bank = bank;
 	}
 }
