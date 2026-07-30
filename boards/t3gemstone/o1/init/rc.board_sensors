@@ -16,7 +16,9 @@
 #   -s     : SPI
 #   -b 1   : PX4 SPI bus 1  (MCU_MCSPI0, am67 port 0)
 #   -c 3   : chip-select index 3 (MCU_SPI0 CS3, per Linux DTS)
-icm20948 -s -b 1 -c 3 start
+#   -M     : enable the on-chip AK09916 magnetometer (read over the ICM's
+#            internal I2C master; publishes sensor_mag)
+icm20948 -s -b 1 -c 3 -M start
 
 # TODO: add an LPS22DF driver (WHO_AM_I 0xB4, different register map from the
 # supported LPS22HB) before enabling the barometer on CS1.
