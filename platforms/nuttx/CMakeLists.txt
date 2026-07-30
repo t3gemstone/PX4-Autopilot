@@ -377,8 +377,55 @@ else()
 		-Wl,--warn-common
 		-Wl,--gc-sections
 
+		# Single spanning link group covering the NuttX archives, every PX4
+		# module library AND the platform/arch/board libraries pulled in
+		# transitively via nuttx_arch's INTERFACE dependencies. Rationale: with a
+		# minimal board module set, symbols in the NuttX arch archives
+		# (libarch.a: am67_i2cbus_initialize, ...) are referenced by
+		# module/platform libraries that link after them, and the core PX4
+		# libraries have circular references (px4_layer <-> parameters,
+		# px4_work_queue -> px4_layer, param_init / px4_task_spawn_cmd across
+		# libs). Every archive must appear INSIDE one --start-group/--end-group
+		# so the linker rescans until all cross-references resolve, regardless of
+		# order. CMake still appends redundant transitive copies of some archives
+		# *after* the group; those are harmless (nothing new to pull). The
+		# transitively-pulled platform/arch/board targets (reached via nuttx_arch
+		# INTERFACE links, not part of ${module_libraries}) are therefore listed
+		# explicitly so a copy of each lands inside the group.
 		-Wl,--start-group
 			${nuttx_libs}
+			${module_libraries}
+			px4_platform
+			drivers_board
+			arch_hrt
+			arch_board_reset
+			arch_board_critmon
+			arch_version
+			arch_spi
+			# Sensor driver framework libs pulled in transitively by sensor
+			# drivers (e.g. the ICM-20948 IMU -> accel/gyro/mag). They reference
+			# libuORB (also in this group), so they must be rescanned here.
+			drivers_accelerometer
+			drivers_gyroscope
+			drivers_magnetometer
+			# device::SPI / device::I2C / CDev base classes. Sensor drivers use
+			# these but do not all declare drivers__device in their DEPENDS (they
+			# rely on another enabled driver pulling it in). With a minimal module
+			# set nothing else does, so link it explicitly here.
+			drivers__device
+			uORB
+			cdev
+			version
+			systemlib
+			events
+			perf
+			tinybson
+			parameters
+			flashparams
+			px4_layer
+			px4_work_queue
+			uorb_msgs
+			heatshrink
 		-Wl,--end-group
 
 		m
@@ -388,8 +435,6 @@ else()
 	if(NOT USE_LD_GOLD)
 		target_link_libraries(px4 PRIVATE -Wl,--print-memory-usage)
 	endif()
-
-	target_link_libraries(px4 PRIVATE ${module_libraries})
 
 	if(config_romfs_root)
 		add_subdirectory(${PX4_SOURCE_DIR}/ROMFS ${PX4_BINARY_DIR}/ROMFS)
