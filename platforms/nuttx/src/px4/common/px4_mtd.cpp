@@ -59,7 +59,8 @@
 #include <nuttx/mtd/mtd.h>
 
 extern "C" {
-	struct mtd_dev_s *ramtron_initialize(FAR struct spi_dev_s *dev);
+	/* ramtron_initialize() is declared in <nuttx/mtd/mtd.h> (2-arg form on
+	 * this NuttX); do not redeclare it here to avoid a conflicting decl. */
 #if defined(CONFIG_MTD_MX25L)
 	struct mtd_dev_s *mx25l_initialize_spi(FAR struct spi_dev_s *dev);
 #endif
@@ -101,7 +102,7 @@ static int ramtron_attach(mtd_instance_s &instance)
 		SPI_SELECT(spi, instance.devid, false);
 		SPI_LOCK(spi, false);
 
-		instance.mtd_dev = ramtron_initialize(spi);
+		instance.mtd_dev = ramtron_initialize(spi, (uint16_t)instance.devid);
 
 		if (instance.mtd_dev) {
 			/* abort on first valid result */

@@ -48,8 +48,18 @@
 
 #include "sem.h"
 
+#ifdef __PX4_NUTTX
+/* These tags are passed straight to open() and stored as f_oflags. On this
+ * NuttX they must be the real access-mode values (O_RDONLY==0, O_WRONLY==1),
+ * otherwise file_readv() rejects a subscriber's read() with -EACCES because
+ * (f_oflags & O_ACCMODE) == O_WRONLY. DeviceNode::open() compares against the
+ * same macros, so the pub/sub matching stays consistent. */
+#define  PX4_F_RDONLY O_RDONLY
+#define  PX4_F_WRONLY O_WRONLY
+#else
 #define  PX4_F_RDONLY 1
 #define  PX4_F_WRONLY 2
+#endif
 
 #ifdef __PX4_NUTTX
 
