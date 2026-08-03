@@ -1,0 +1,5 @@
+menuconfig SYSTEMCMDS_I2CREAD
+	bool "i2cread"
+	default n
+	---help---
+		Enable support for i2cread (read bytes from an I2C device register)

@@ -72,7 +72,15 @@ private:
 	uint32_t		_device_id{0};
 	const enum Rotation	_rotation;
 
-	int32_t			_imu_gyro_rate_max{0};
+	// Fallback used only when the IMU_GYRO_RATEMAX param does not exist (minimal
+	// sensor-only boards); on boards that build the sensors module this is
+	// overwritten by param_get(). Without it, param_get() leaves 0 and
+	// get_max_rate_hz() hits the 100 Hz constrain floor, which forces FIFO IMU
+	// drivers into their worst-case samples-per-poll config (reading almost the
+	// whole small FIFO each poll) and causes constant FIFO overflow. 400 Hz (the
+	// IMU_GYRO_RATEMAX default) keeps the per-poll sample count well below the
+	// FIFO depth.
+	int32_t			_imu_gyro_rate_max{400};
 
 	float			_range{math::radians(2000.f)};
 	float			_scale{1.f};

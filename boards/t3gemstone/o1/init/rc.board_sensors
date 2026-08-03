@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# T3 Gemstone O1 (AM67 / J722S) board-specific sensor startup.
+#------------------------------------------------------------------------------
+#
+# The sensors are on MCSPI0 (per the Linux DTS chip-selects):
+#   CS1 -> LPS22DF  barometer   (no PX4 driver yet - LPS22HB != LPS22DF)
+#   CS3 -> ICM-20948 IMU + AK09916 magnetometer
+#
+# The AM67 SPI arch-support layer (platforms/nuttx/src/px4/ti/am67/spi) is now
+# in place, so px4_spibus_initialize() resolves to the NuttX am67_mcspi driver
+# and the ICM-20948 can bind. CS is driven in hardware by the MCSPI channel, so
+# no separate chip-select GPIO is needed; the '-c 3' below is the logical CS
+# index PX4 records for the device (maps to MCSPI channel 3 in the board table).
+#
+#   -s     : SPI
+#   -b 1   : PX4 SPI bus 1  (MCU_MCSPI0, am67 port 0)
+#   -c 3   : chip-select index 3 (MCU_SPI0 CS3, per Linux DTS)
+#   -M     : enable the on-chip AK09916 magnetometer (read over the ICM's
+#            internal I2C master; publishes sensor_mag)
+icm20948 -s -b 1 -c 3 -M start
+
+# TODO: add an LPS22DF driver (WHO_AM_I 0xB4, different register map from the
+# supported LPS22HB) before enabling the barometer on CS1.
