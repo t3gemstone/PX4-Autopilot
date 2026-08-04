@@ -35,13 +35,10 @@
 # grows (io_pins/gpio, spi), add the corresponding sources here (led.c,
 # spi.cpp, ...) and link the arch_* targets, mirroring the STM32 boards.
 
-# Board-scoped parameters. IMU_GYRO_RATEMAX normally comes from the
-# vehicle_angular_velocity module, which this sensor-only board does not build;
-# provide it here so it is a real, runtime-tunable parameter (see the ICM20948
-# FIFO drain rate). Scoped to this board so it never collides with the module's
-# definition on full builds.
-set_property(GLOBAL APPEND PROPERTY PX4_MODULE_CONFIG_FILES
-	${CMAKE_CURRENT_SOURCE_DIR}/board_params.yaml)
+# NOTE: IMU_GYRO_RATEMAX used to be provided here as a board-scoped param for the
+# sensor-only bring-up. Now that MODULES_SENSORS (vehicle_angular_velocity) is
+# built, the module defines it canonically (same 400 Hz default), so the board
+# copy was removed to avoid a duplicate-parameter definition.
 
 add_library(drivers_board
 	init.c

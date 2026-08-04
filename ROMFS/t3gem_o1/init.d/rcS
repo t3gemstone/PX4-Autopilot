@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# T3 Gemstone O1 (AM67 R5F) boot - deliberately LINEAR:
+# no variables, no nesting, no airframe indirection. This NSH build
+# chokes on px4fmu_common's rcS ($VARS expansion crash); every line
+# below is independently proven on this hardware.
+#
+set +e
+
+# RAM-only params (no SD/MTD): re-applied every boot
+param set SYS_AUTOSTART 4001
+param set SYS_HAS_BARO 0
+param set SYS_HAS_GPS 0
+
+dataman start
+icm20948 -s -b 1 -c 3 -M start
+sensors start
+ekf2 start
+commander start
+mc_rate_control start
+mc_att_control start
+mc_pos_control start
+mc_hover_thrust_estimator start
+control_allocator start
+land_detector start multicopter
+rc_update start
+manual_control start
+navigator start
+
+# transport to Linux/QGC last; TX flows once the bridge primes the channel
+mavlink start -d /dev/tty

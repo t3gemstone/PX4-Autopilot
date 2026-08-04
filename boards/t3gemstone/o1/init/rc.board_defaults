@@ -1,16 +1,11 @@
 #!/bin/sh
 #
-# T3 Gemstone O1 (AM67 / J722S) board-specific defaults.
-#------------------------------------------------------------------------------
+# T3 Gemstone O1 (AM67 R5F) board defaults
+#
 
-# No ADC / system-power sensing on this board yet -> skip the supply check so
-# the commander does not refuse to arm on a missing power brick.
-param set-default CBRK_SUPPLY_CHK 894281
+# Generic Quadcopter X airframe so rcS starts the full MC stack
+param set-default SYS_AUTOSTART 4001
 
-# The IMU is an ICM-20948 (9-axis, integrated AK09916 magnetometer).
-param set-default SYS_HAS_MAG 1
-
-# NOTE: the PWM output function map (PWM_MAIN_FUNC1..5 = Motor1..5) is set in
-# src/init.c board_app_initialize() via param_set_default_value(), NOT here -
-# this board does not build CONFIG_NSH_ROMFSETC so rcS/rc.board_defaults never
-# auto-runs.
+# Bench/board reality: no barometer, no GPS attached
+param set-default SYS_HAS_BARO 0
+param set-default SYS_HAS_GPS 0
