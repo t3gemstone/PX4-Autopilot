@@ -236,6 +236,13 @@ if(CONFIG_NET)
 	add_nuttx_dir(net net y -D__KERNEL__ all)
 endif()
 
+# OpenAMP (open-amp + libmetal, one libopenamp.a) - required once rptun.o is
+# actually pulled into the link (RPTUN -> RPMSG_VIRTIO -> RPMSG selects OPENAMP,
+# and DRIVERS_VIRTIO selects it too). Provides metal_*/remoteproc_* symbols.
+if(CONFIG_OPENAMP)
+	add_nuttx_dir(openamp openamp y -D__KERNEL__ all)
+endif()
+
 ###############################################################################
 # NuttX oldconfig: Update a configuration using a provided .config as base
 add_custom_target(oldconfig_nuttx

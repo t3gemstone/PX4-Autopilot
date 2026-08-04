@@ -1,16 +1,33 @@
 CONFIG_BOARD_TOOLCHAIN="arm-none-eabi"
 CONFIG_BOARD_ARCHITECTURE="cortex-r5f"
 
-# --- First bring-up: minimal "does it boot + uORB alive" set ---------------
-# Flight-stack modules (commander, ekf2, mavlink, ...) are intentionally left
-# out until the platform is proven. The ICM-20948 IMU is enabled now that the
-# AM67 SPI arch-support layer (px4_spibus + hardware-CS glue) exists
-# (platforms/nuttx/src/px4/ti/am67/spi); it is started from
-# init/rc.board_sensors.
-
+# --- Drivers ----------------------------------------------------------------
+# The ICM-20948 IMU is enabled now that the AM67 SPI arch-support layer
+# (px4_spibus + hardware-CS glue) exists (platforms/nuttx/src/px4/ti/am67/spi);
+# it is started from init/rc.board_sensors.
 CONFIG_DRIVERS_IMU_INVENSENSE_ICM20948=y
 CONFIG_DRIVERS_PWM_OUT=y
+
+# --- Flight stack (multirotor closed loop) ----------------------------------
+# Enabled to test the full autopilot alongside the peripheral drivers, with
+# QGroundControl over the virtio-net link to A53 Linux. Multirotor path only
+# (this airframe is Motor1..5, see src/init.c) - no FW/VTOL. Navigator + dataman
+# are required by commander's geofence failsafe (px4::params::GF_ACTION). Logger
+# (needs storage) intentionally left out for this stage.
+CONFIG_MODULES_COMMANDER=y
 CONFIG_MODULES_CONTROL_ALLOCATOR=y
+CONFIG_MODULES_DATAMAN=y
+CONFIG_MODULES_EKF2=y
+CONFIG_MODULES_LAND_DETECTOR=y
+CONFIG_MODULES_MANUAL_CONTROL=y
+CONFIG_MODULES_MAVLINK=y
+CONFIG_MODULES_MC_ATT_CONTROL=y
+CONFIG_MODULES_MC_HOVER_THRUST_ESTIMATOR=y
+CONFIG_MODULES_MC_POS_CONTROL=y
+CONFIG_MODULES_MC_RATE_CONTROL=y
+CONFIG_MODULES_NAVIGATOR=y
+CONFIG_MODULES_RC_UPDATE=y
+CONFIG_MODULES_SENSORS=y
 
 CONFIG_SYSTEMCMDS_ACTUATOR_TEST=y
 CONFIG_SYSTEMCMDS_I2CDETECT=y
@@ -24,3 +41,4 @@ CONFIG_SYSTEMCMDS_TOPIC_LISTENER=y
 CONFIG_SYSTEMCMDS_UORB=y
 CONFIG_SYSTEMCMDS_VER=y
 CONFIG_SYSTEMCMDS_WORK_QUEUE=y
+CONFIG_BOARD_ROMFSROOT="t3gem_o1"

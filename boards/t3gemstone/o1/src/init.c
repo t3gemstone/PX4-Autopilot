@@ -52,6 +52,7 @@
 
 #include <errno.h>
 #include <syslog.h>
+#include <nuttx/serial/uart_rpmsg_raw.h>
 
 #include <nuttx/board.h>
 
@@ -64,6 +65,14 @@
  * NuttX makes later from nxtask_startup(). Not exposed in a public header, so
  * declare it locally. */
 extern void lib_cxx_initialize(void);
+
+#ifdef CONFIG_RPTUN
+/* AM67 rptun (RPMsg + virtio-net over the A53-Linux remoteproc link). Lives in
+ * arch/arm/src/am67 (not on this board's include path), so declare it locally.
+ * PX4 uses a custom board dir and does not compile the NuttX am67_bringup.c,
+ * so the init call that file makes for the plain-NSH target must be made here. */
+extern int am67_rptun_init(void);
+#endif
 
 /****************************************************************************
  * Name: board_app_initialize
@@ -133,8 +142,41 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 	am67_spidev_initialize();
 #endif
 
+#ifdef CONFIG_RPTUN
+	/* Register the resource table (RPMsg + virtio-net) with NuttX's OpenAMP
+	 * stack and enable the NAVSS mailbox IRQ. Linux is the remoteproc master
+	 * and has already booted this R5F, so the vdev status/features are live in
+	 * the resource table by the time we get here. Runs after px4_platform_init()
+	 * so the work queues the rptun thread relies on are already up. */
+	int rptun_ret = am67_rptun_init();
+
+	if (rptun_ret < 0) {
+		syslog(LOG_ERR, "[boot] am67_rptun_init failed (%d)\n", rptun_ret);
+	}
+#endif
+
 	return OK;
 }
+
+
+#ifdef CONFIG_RPMSG_UART_RAW
+/****************************************************************************
+ * Name: rpmsg_serialrawinit
+ *
+ * Description:
+ *   Called by drivers_initialize() when CONFIG_RPMSG_UART_RAW is set.
+ *   The raw driver speaks unframed bytes on the fixed "rpmsg-tty"
+ *   service, compatible with Linux's rpmsg_tty.  Empty devname registers
+ *   as /dev/tty on NuttX; appears on Linux as /dev/ttyRPMSG0 once the
+ *   name-service announcement lands.
+ *
+ ****************************************************************************/
+
+void rpmsg_serialrawinit(void)
+{
+	uart_rpmsg_raw_init("r5f", "", 4096, false);
+}
+#endif
 
 #ifdef CONFIG_BOARD_LATE_INITIALIZE
 /****************************************************************************
