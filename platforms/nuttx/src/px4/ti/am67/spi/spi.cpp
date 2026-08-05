@@ -137,9 +137,15 @@ uint8_t am67_spi0status(FAR struct spi_dev_s *dev, uint32_t devid)
  */
 __EXPORT void am67_spidev_initialize(void)
 {
-	/* Power the onboard sensor rail (IMU_EN / MCU0 pin 12) before touching the
-	 * bus so the ICM-20948 / LPS22DF are alive when we probe them. */
+	/* Power-cycle the onboard sensor rail (IMU_EN / MCU0 pin 12) so every
+	 * chip on it gets a clean power-on reset. The rail switch floats between
+	 * board power-up and the first driver of this pin, and a dirty VDD ramp
+	 * can leave the LPS22DF latched unresponsive until a real POR; the
+	 * ICM-20948 recovers via its driver's soft reset, the LPS22DF cannot. */
+	am67_sensors_power_enable(false);
+	usleep(100 * 1000);
 	am67_sensors_power_enable(true);
+	usleep(50 * 1000);
 
 	syslog(LOG_INFO, "[spi] MCU_MCSPI0 init: resetting controller...\n");
 	am67_spiinitialize();
