@@ -1,0 +1,5 @@
+menuconfig DRIVERS_BAROMETER_LPS22DF
+	bool "lps22df"
+	default n
+	---help---
+		Enable support for the ST LPS22DF barometer (SPI)
