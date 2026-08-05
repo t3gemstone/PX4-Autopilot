@@ -6,6 +6,6 @@
 # Generic Quadcopter X airframe so rcS starts the full MC stack
 param set-default SYS_AUTOSTART 4001
 
-# Bench/board reality: no barometer, no GPS attached
-param set-default SYS_HAS_BARO 0
+# Bench/board reality: onboard LPS22DF barometer, no GPS attached
+param set-default SYS_HAS_BARO 1
 param set-default SYS_HAS_GPS 0

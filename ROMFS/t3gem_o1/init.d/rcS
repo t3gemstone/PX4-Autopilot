@@ -9,11 +9,12 @@ set +e
 
 # RAM-only params (no SD/MTD): re-applied every boot
 param set SYS_AUTOSTART 4001
-param set SYS_HAS_BARO 0
+param set SYS_HAS_BARO 1
 param set SYS_HAS_GPS 0
 
 dataman start
 icm20948 -s -b 1 -c 3 -M start
+lps22df -s -b 1 start
 sensors start
 ekf2 start
 commander start

@@ -42,9 +42,8 @@
  * (platforms/nuttx/src/px4/ti/am67/spi/spi.cpp) reads this back in
  * am67_spi0select() to select the hardware channel.
  *
- * Wiring (per the Linux DTS): ICM-20948 IMU on MCU_SPI0 CS3.
- * The LPS22DF barometer sits on CS1, but PX4 has no LPS22DF driver yet, so it
- * is left out for now (add a device entry + a driver to enable it).
+ * Wiring (per the Linux DTS): ICM-20948 IMU on MCU_SPI0 CS3, LPS22DF
+ * barometer on MCU_SPI0 CS1.
  */
 
 #include <px4_platform_common/px4_config.h>
@@ -59,6 +58,12 @@ constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
 				0,                                                       /* drdy_gpio (polled, no DRDY line) */
 				PX4_SPIDEV_ID(PX4_SPI_DEVICE_ID, DRV_IMU_DEVTYPE_ICM20948),
 				DRV_IMU_DEVTYPE_ICM20948,
+			},
+			{
+				AM67_MCSPI_CH_LPS22DF,                                   /* cs_gpio -> MCSPI channel */
+				0,                                                       /* drdy_gpio (polled, no DRDY line) */
+				PX4_SPIDEV_ID(PX4_SPI_DEVICE_ID, DRV_BARO_DEVTYPE_LPS22DF),
+				DRV_BARO_DEVTYPE_LPS22DF,
 			},
 		},
 		0,                      /* power_enable_gpio: rail via am67_sensors_power_enable() */
