@@ -59,6 +59,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <string.h>
+#include <syslog.h>
 
 #include <drivers/drv_pwm_output.h>
 #include <px4_arch/io_timer.h>
@@ -70,6 +71,8 @@ int am67_epwm_init(void);
 struct pwm_lowerhalf_s *am67_epwminitialize(int pwm);
 int am67_ecap_init(void);
 struct pwm_lowerhalf_s *am67_ecapinitialize(int ecap);
+int am67_tisci_device_on(uint32_t id);
+uint32_t am67_epwm_tbclk_guard(void);
 __END_DECLS
 
 #define AM67_PWM_NGROUPS   BOARD_NUM_IO_TIMERS      /* 3: EPWM0, EPWM1, eCAP0 */
@@ -81,6 +84,12 @@ static uint32_t g_rate[AM67_PWM_NGROUPS]  = { 50, 50, 50 }; /* Hz per group */
 static uint16_t g_pulse_us[AM67_PWM_NCHANNELS];             /* commanded width */
 static bool     g_armed;
 static bool     g_inited;
+
+/* Groups pwm_out drives (bit n = group n). Every hardware access below is
+ * limited to them: the other groups may belong to the dshot driver
+ * (PWM_MAIN_TIMx < -1), whose time base a PWM start() would overwrite.
+ */
+static uint32_t g_owned;
 
 /* Channel -> group and NuttX in-module channel (1=A, 2=B; eCAP APWM = 1). */
 static inline unsigned chan_group(unsigned ch) { return (ch < 4u) ? (ch / 2u) : 2u; }
@@ -118,7 +127,7 @@ static void commit_group(unsigned group)
 {
 	struct pwm_lowerhalf_s *lower = g_lower[group];
 
-	if (lower == NULL || !g_armed) {
+	if (lower == NULL || !g_armed || (g_owned & (1u << group)) == 0) {
 		return;
 	}
 
@@ -141,29 +150,80 @@ static void commit_group(unsigned group)
 		info.channels[1].channel = -1;  /* terminate: no second channel */
 	}
 
-	lower->ops->start(lower, &info);
+	/* A group that cannot start gives no pulses while pwm_out believes it
+	 * does: say so once per rate (OneShot, rate 0, is not implemented). */
+	static uint32_t reported_rate[AM67_PWM_NGROUPS];
+	const int ret = lower->ops->start(lower, &info);
+
+	if (ret < 0 && reported_rate[group] != g_rate[group] + 1) {
+		reported_rate[group] = g_rate[group] + 1;
+		syslog(LOG_ERR, "[pwm] group %u did not start at %u Hz (%d): no motor pulses\n",
+		       group, (unsigned)g_rate[group], ret);
+	}
 }
 
 int up_pwm_servo_init(uint32_t channel_mask)
 {
 	if (!g_inited) {
 		am67_epwm_init();
+
+		/* J722S_DEV_EPWM0 / EPWM1. Setup reads PID 0 and skips pinmux
+		 * while these power domains are off. */
+		(void)am67_tisci_device_on(86u);
+		(void)am67_tisci_device_on(87u);
+
+		/* J722S_DEV_ECAP1 (channel 5). Its setup checks the PID and drops
+		 * the channel if the module is not alive. */
+		(void)am67_tisci_device_on(52u);
+
 		am67_ecap_init();
 
 		g_lower[0] = am67_epwminitialize(0);
 		g_lower[1] = am67_epwminitialize(1);
 		g_lower[2] = am67_ecapinitialize(1);   /* eCAP1 = GPIO-16 (eCAP0 collides with EPWM0_B on C20) */
-
-		for (unsigned g = 0; g < AM67_PWM_NGROUPS; g++) {
-			if (g_lower[g] != NULL) {
-				g_lower[g]->ops->setup(g_lower[g]);
-			}
-		}
-
 		g_inited = true;
 	}
 
-	return channel_mask;
+	static int attempts;
+	uint32_t result = channel_mask;
+	bool epwm_failed = false;
+
+	for (unsigned g = 0; g < AM67_PWM_NGROUPS; g++) {
+		const uint32_t bit = 1u << g;
+
+		/* Leave groups outside the mask alone (see g_owned) */
+		if (g_lower[g] == NULL || (group_mask(g) & channel_mask) == 0) {
+			g_owned &= ~bit;
+			continue;
+		}
+
+		if ((g_owned & bit) != 0) {
+			continue;
+		}
+
+		/* A group that fails setup must not stay in the mask: pwm_out
+		 * would arm silent motors and still look healthy. */
+		if (g_lower[g]->ops->setup(g_lower[g]) < 0) {
+			epwm_failed |= (g < 2u);
+			result &= ~group_mask(g);
+			continue;
+		}
+
+		g_owned |= bit;
+	}
+
+	/* pwm_out retries a failed init: give the EPWM power domains a few
+	 * chances before dropping their channels. */
+	if (epwm_failed && ++attempts < 3) {
+		syslog(LOG_ERR, "epwm setup failed, retry %d\n", attempts);
+		return -EIO;
+	}
+
+	if (epwm_failed) {
+		syslog(LOG_ERR, "epwm setup failed, channels dropped\n");
+	}
+
+	return (int)result;
 }
 
 void up_pwm_servo_deinit(uint32_t channel_mask)
@@ -189,6 +249,9 @@ uint16_t up_pwm_servo_get(unsigned channel)
 
 void up_pwm_update(unsigned channels_mask)
 {
+	/* Linux gates unused EPWM time-base clocks at boot; restore ours */
+	(void)am67_epwm_tbclk_guard();
+
 	for (unsigned g = 0; g < AM67_PWM_NGROUPS; g++) {
 		if (channels_mask & group_mask(g)) {
 			commit_group(g);
@@ -227,7 +290,7 @@ void up_pwm_servo_arm(bool armed, uint32_t channel_mask)
 	g_armed = armed;
 
 	for (unsigned g = 0; g < AM67_PWM_NGROUPS; g++) {
-		if (g_lower[g] == NULL) {
+		if (g_lower[g] == NULL || (g_owned & (1u << g)) == 0) {
 			continue;
 		}
 

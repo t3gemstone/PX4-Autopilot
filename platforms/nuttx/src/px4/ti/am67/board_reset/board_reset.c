@@ -44,33 +44,54 @@
  *     chosen on the Linux side (/lib/firmware + remoteproc), not by us.
  *   - There is no Cortex-M style self-reset (no NVIC AIRCR/SYSRESETREQ), and
  *     NuttX does not implement up_systemreset() for this core.
- *   - A genuine core reset is owned by the K3 Device Manager (TISCI) or by
- *     Linux (`echo stop/start > /sys/class/remoteproc/.../state`). We have no
- *     TISCI transport here yet.
+ *   - A core reset belongs to Linux (`echo stop/start >
+ *     /sys/class/remoteproc/.../state`), which also reloads the image; a
+ *     running core cannot reset itself through the Device Manager.
  *
- * So we cannot truthfully "reboot" ourselves. Rather than silently doing
- * nothing (which would let a corrupted OS keep running after an assert - see
- * board_crashdump.c, which calls board_reset() precisely because RAM is
- * already trashed), board_reset() logs loudly and parks the core in a defined
- * halted state with interrupts disabled. If remoteproc crash-recovery is
- * enabled on the Linux side, it can then detect the stalled core and reload
- * the firmware.
+ * So the core resets the whole SoC itself: board_reset() cuts the motor
+ * outputs and asks the Device Manager for a SoC reset (TISCI SYS_RESET, the
+ * request Linux reboot sends). U-Boot then starts this core again from the
+ * SD boot partition (early boot); Linux restarts too and attaches. Nothing
+ * waits for Linux: a reset needed in a hurry happens at once. The log
+ * (RAMLOG) lives in DDR that the reset does not clear, so the next start
+ * still shows why the previous one ended.
  *
- * TODO: once a TISCI transport exists, replace the halt with a proper core
- * reset request (or an mbox/IPC ping asking Linux to restart us).
+ * From an interrupt handler or with interrupts off (assert, crash) the
+ * same happens with the lock-free request. Only if the DM refuses does the
+ * core fall back to asking Linux (remoteproc mailbox) and halting.
  */
 
 #include <px4_platform_common/px4_config.h>
 #include <px4_platform_common/board_common.h>
-#include <px4_platform_common/shutdown.h>
 
 #include <nuttx/board.h>
+#include <nuttx/cache.h>
 #include <nuttx/irq.h>
 
 #include <errno.h>
 #include <syslog.h>
+#include <unistd.h>
+
+/* arch/arm/src/am67/am67_rptun.c */
+#ifdef CONFIG_RPTUN
+extern void am67_rptun_request_restart(void);
+#endif
 
 #define rsterr(fmt, ...)  syslog(LOG_ERR, "[reset] " fmt "\n", ##__VA_ARGS__)
+
+/* arch/arm/src/am67/am67_tisci.c */
+extern int am67_tisci_sys_reset(void);
+extern int am67_tisci_sys_reset_now(void);
+
+/* Motor output kill switches from arch/arm/src/am67 (Trip-Zone / eCAP stop).
+ * Both are safe to call before the outputs were set up.
+ */
+#if defined(CONFIG_AM67_EPWM0) || defined(CONFIG_AM67_EPWM1)
+extern void am67_epwm_emergency_stop(void);
+#endif
+#if defined(CONFIG_AM67_ECAP0) || defined(CONFIG_AM67_ECAP1) || defined(CONFIG_AM67_ECAP2)
+extern void am67_ecap_emergency_stop(void);
+#endif
 
 #ifdef CONFIG_BOARDCTL_RESET
 
@@ -107,23 +128,49 @@ int board_configure_reset(reset_mode_e mode, uint32_t arg)
  */
 int board_reset(int status)
 {
-	if (status == REBOOT_TO_BOOTLOADER) {
-		rsterr("reboot-to-bootloader requested but unsupported on this core "
-		       "(remoteproc selects the image).");
+	/* The EPWM and eCAP counters keep running without the CPU, so a halted
+	 * core would leave every motor on its last command. Cut them first,
+	 * before anything below can fail.
+	 */
+	irqstate_t flags = up_irq_save();
+#if defined(CONFIG_AM67_EPWM0) || defined(CONFIG_AM67_EPWM1)
+	am67_epwm_emergency_stop();
+#endif
+#if defined(CONFIG_AM67_ECAP0) || defined(CONFIG_AM67_ECAP1) || defined(CONFIG_AM67_ECAP2)
+	am67_ecap_emergency_stop();
+#endif
+
+	/* Interrupts were on at entry (bit 7 = I) and this is not a handler */
+	const bool thread = !up_interrupt_context() && (flags & (1u << 7)) == 0;
+
+	rsterr("board_reset(status=%d): motors cut, resetting the SoC", status);
+
+	int ret;
+
+	if (thread) {
+		/* The Trip-Zone holds the outputs low on its own; the locked
+		 * request may wait for another TISCI user, so not with IRQs off.
+		 */
+		up_irq_restore(flags);
+		up_flush_dcache_all(); /* the log must reach DDR */
+		ret = am67_tisci_sys_reset();
 
 	} else {
-		rsterr("board_reset(status=%d) requested.", status);
+		up_flush_dcache_all();
+		ret = am67_tisci_sys_reset_now();
 	}
 
-	rsterr("No self-reset path on the remoteproc-loaded R5F "
-	       "(no up_systemreset()/TISCI). Halting core with IRQs disabled.");
-	rsterr("Recover from the Linux host, e.g.:");
-	rsterr("  echo stop  > /sys/class/remoteproc/remoteprocN/state");
-	rsterr("  echo start > /sys/class/remoteproc/remoteprocN/state");
+	/* The DM refused: the last resort is Linux */
+	rsterr("SoC reset refused (%d): asking Linux to restart this core", ret);
+#ifdef CONFIG_RPTUN
+	am67_rptun_request_restart();
+#endif
 
-	/* Freeze in a defined state so a corrupted OS cannot keep running and so
-	 * remoteproc crash-recovery (if enabled) can take over. */
-	up_irq_save();
+	if (thread) {
+		for (;;) {
+			sleep(1);
+		}
+	}
 
 	for (;;) {
 	}

@@ -533,7 +533,22 @@ bool ICM20948::RegisterCheck(const T &reg_cfg)
 {
 	bool success = true;
 
-	const uint8_t reg_value = RegisterRead(reg_cfg.reg);
+	// A read that failed on the bus says nothing about the register. Treating
+	// its zeroed buffer as the register value turned a single transient SPI
+	// error (the check runs right after any failed transfer) into a full
+	// device reset and over a second without gyro data. Check again next time;
+	// a bus that keeps failing still resets the device through the FIFO read
+	// failure count.
+	uint8_t cmd[2] {};
+	cmd[0] = static_cast<uint8_t>(reg_cfg.reg) | DIR_READ;
+	SelectRegisterBank(reg_cfg.reg);
+
+	if (transfer(cmd, cmd, sizeof(cmd)) != PX4_OK) {
+		perf_count(_bad_transfer_perf);
+		return true;
+	}
+
+	const uint8_t reg_value = cmd[1];
 
 	if (reg_cfg.set_bits && ((reg_value & reg_cfg.set_bits) != reg_cfg.set_bits)) {
 		PX4_DEBUG("0x%02hhX: 0x%02hhX (0x%02hhX not set)", (uint8_t)reg_cfg.reg, reg_value, reg_cfg.set_bits);
@@ -594,6 +609,24 @@ uint16_t ICM20948::FIFOReadCount()
 	return combine(fifo_count_buf[1], fifo_count_buf[2]);
 }
 
+static bool fifo_accel_equal(const FIFO::DATA &f0, const FIFO::DATA &f1)
+{
+	return (memcmp(&f0.ACCEL_XOUT_H, &f1.ACCEL_XOUT_H, 6) == 0);
+}
+
+// The FIFO has no header, so a read that starts inside a sample still looks
+// like data. The accel runs at half the gyro rate and every accel sample is
+// stored twice; a pair of equal accel fields shows the read is aligned.
+static bool fifo_aligned(const FIFO::DATA fifo[], const uint8_t samples)
+{
+	if (samples < 4) {
+		return true;
+	}
+
+	return (fifo_accel_equal(fifo[0], fifo[1]) && fifo_accel_equal(fifo[2], fifo[3]))
+	       || fifo_accel_equal(fifo[1], fifo[2]);
+}
+
 bool ICM20948::FIFORead(const hrt_abstime &timestamp_sample, uint8_t samples)
 {
 	SelectRegisterBank(REG_BANK_SEL_BIT::USER_BANK_0);
@@ -603,6 +636,9 @@ bool ICM20948::FIFORead(const hrt_abstime &timestamp_sample, uint8_t samples)
 
 	if (transfer((uint8_t *)&buffer, (uint8_t *)&buffer, transfer_size) != PX4_OK) {
 		perf_count(_bad_transfer_perf);
+		// Part of the FIFO may already have been clocked out, so the next read
+		// would start inside a sample. Start over from an empty FIFO.
+		FIFOReset();
 		return false;
 	}
 
@@ -625,6 +661,14 @@ bool ICM20948::FIFORead(const hrt_abstime &timestamp_sample, uint8_t samples)
 	const uint16_t valid_samples = math::min(samples, fifo_count_samples);
 
 	if (valid_samples > 0) {
+		// Check before publishing anything: a misaligned read turns gyro and
+		// accel into garbage that is still in range.
+		if (!fifo_aligned(buffer.f, valid_samples)) {
+			perf_count(_bad_transfer_perf);
+			FIFOReset();
+			return false;
+		}
+
 		ProcessGyro(timestamp_sample, buffer.f, valid_samples);
 
 		if (ProcessAccel(timestamp_sample, buffer.f, valid_samples)) {
@@ -646,11 +690,6 @@ void ICM20948::FIFOReset()
 	// reset while FIFO is disabled
 	_drdy_count = 0;
 	_drdy_timestamp_sample.store(0);
-}
-
-static bool fifo_accel_equal(const FIFO::DATA &f0, const FIFO::DATA &f1)
-{
-	return (memcmp(&f0.ACCEL_XOUT_H, &f1.ACCEL_XOUT_H, 6) == 0);
 }
 
 bool ICM20948::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DATA fifo[], const uint8_t samples)

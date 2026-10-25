@@ -69,10 +69,8 @@
 #define HRT_TIMER_RATE   25000000u     /* DMTimer input = HFOSC0 @ 25 MHz         */
 
 /* I2C ----------------------------------------------------------------------
- * The only I2C bus enabled and wired on this board is WKUP_I2C0 (WKUP domain,
- * 0x2b200000) -> PX4 bus 3. The AM67 also has MCU_I2C0 (MCU domain,
- * 0x04900000 -> PX4 bus 1), but it carries no peripheral and is not built, so
- * it is not listed. See src/i2c.cpp for the table and mapping.
+ * One bus: MCU_I2C0 -> PX4 bus 1, external (HAT 3/5). WKUP_I2C0 belongs to
+ * Linux (PMIC, RTC, EEPROM) and is not built. See src/i2c.cpp.
  */
 #define PX4_NUMBER_I2C_BUSES   1
 
@@ -100,10 +98,18 @@
 #define AM67_MCSPI_CH_ICM20948 3     /* MCU_SPI0 CS3 */
 
 /* Power / battery ----------------------------------------------------------
- * No ADC layer on the AM67 yet -> no power bricks. board_common.h explicitly
- * allows BOARD_NUMBER_BRICKS == 0.
+ * The AM67 has no PX4 ADC layer. An analog power module is read through an
+ * external ADS1115 on MCU_I2C0 (HAT 3/5), enabled with ADC_ADS1115_EN: AIN0
+ * carries the voltage sense, AIN1 the current sense. The module's scaling
+ * is set with BAT1_V_DIV / BAT1_A_PER_V; nothing here is module specific.
+ * Without ADC_ADS1115_EN no adc_report is published and battery_status
+ * publishes nothing, as before.
  */
-#define BOARD_NUMBER_BRICKS    0
+#define BOARD_NUMBER_BRICKS          1
+#define ADC_BATTERY_VOLTAGE_CHANNEL  0
+#define ADC_BATTERY_CURRENT_CHANNEL  1
+/* No power-path controller reports which brick is live: always valid. */
+#define BOARD_ADC_BRICK_VALID        (1)
 
 /* PWM outputs --------------------------------------------------------------
  * Actuator outputs via the PX4 pwm_out module. The am67 arch pwm_servo layer
@@ -119,12 +125,18 @@
 #define BOARD_NUM_IO_TIMERS          3
 
 /* RC input -----------------------------------------------------------------
- * board_common.h requires RC_SERIAL_PORT or CONFIG_BOARD_SERIAL_RC to be
- * defined. No RC receiver is wired yet; this is a placeholder so the tree
- * compiles. The RC driver is not started from rcS, so the device is never
- * opened. TODO: point at a real UART when RC is added.
+ * board_common.h requires RC_SERIAL_PORT or CONFIG_BOARD_SERIAL_RC. No RC
+ * receiver is wired and rcS does not start an RC driver. /dev/ttyS1 is the
+ * GPS UART, so the placeholder names a node that does not exist; opening it
+ * fails instead of stealing the GPS port. Point it at the RC UART in D5.
  */
-#define RC_SERIAL_PORT         "/dev/ttyS1"
+#define RC_SERIAL_PORT         "/dev/ttyS9"
+
+/* Commander reports the armed state here every cycle. While it is set the
+ * R5F refuses a remoteproc stop from Linux (NuttX am67_rptun.c): no
+ * shutdown ACK, so `echo stop` fails and the autopilot keeps running.
+ */
+#define BOARD_INDICATE_EXTERNAL_LOCKOUT_STATE(enabled) am67_rptun_set_lockout(enabled)
 
 /****************************************************************************
  * Public Functions
@@ -135,6 +147,9 @@ __BEGIN_DECLS
 /* Bring up the MCU_MCSPI0 controller (arch spi layer,
  * platforms/nuttx/src/px4/ti/am67/spi). Called from board_app_initialize(). */
 void am67_spidev_initialize(void);
+
+/* NuttX arch/arm/src/am67/am67_rptun.c */
+void am67_rptun_set_lockout(bool locked);
 
 __END_DECLS
 

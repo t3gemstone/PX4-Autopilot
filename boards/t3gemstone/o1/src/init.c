@@ -55,6 +55,9 @@
 #include <nuttx/serial/uart_rpmsg_raw.h>
 
 #include <nuttx/board.h>
+#include <nuttx/arch.h>
+#include <nuttx/mmcsd.h>
+#include <drivers/drv_hrt.h>
 
 #include <parameters/param.h>
 
@@ -66,12 +69,19 @@
  * declare it locally. */
 extern void lib_cxx_initialize(void);
 
+/* arch/arm/src/am67/am67_serial.c: powers MAIN_UART6 (/dev/ttyS1, GPS). */
+extern int am67_uart6_enable(void);
+
 #ifdef CONFIG_RPTUN
 /* AM67 rptun (RPMsg + virtio-net over the A53-Linux remoteproc link). Lives in
  * arch/arm/src/am67 (not on this board's include path), so declare it locally.
  * PX4 uses a custom board dir and does not compile the NuttX am67_bringup.c,
  * so the init call that file makes for the plain-NSH target must be made here. */
 extern int am67_rptun_init(void);
+
+/* arch/arm/src/am67/am67_sdhci.c: the eMMC (MMCSD0) as an SDIO slot. */
+struct sdio_dev_s;
+extern struct sdio_dev_s *am67_sdhci0_initialize(void);
 #endif
 
 /****************************************************************************
@@ -86,6 +96,12 @@ extern int am67_rptun_init(void);
 __EXPORT int board_app_initialize(uintptr_t arg)
 {
 	(void)arg;
+
+	/* MAIN_UART6 is /dev/ttyS1 (GPS, HAT 7/11). The DMSC keeps it off and
+	 * MDR1 disabled until asked; the GPS driver opens it from rcS, later. */
+	if (am67_uart6_enable() < 0) {
+		syslog(LOG_ERR, "[boot] MAIN_UART6 power-on failed, no GPS\n");
+	}
 
 	/* Run C++ global constructors before any PX4 code executes. This board
 	 * brings PX4 up from board_late_initialize(), which NuttX calls from
@@ -108,31 +124,28 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 		return ret;
 	}
 
-	/* Apply the board manifest (no-op until we describe HW variants). */
-	px4_platform_configure();
-
-	/* Map the PWM outputs to actuator functions as board defaults. This board
-	 * has no persistent param storage and does not auto-run rcS/rc.board_defaults,
-	 * so set the DEFAULT (not the value: no autosave, and a user override still
-	 * wins) here to keep the outputs mapped across every boot:
-	 *   ch0 EPWM0_A=Motor1  ch1 EPWM0_B=Motor2  ch2 EPWM1_A=Motor3
-	 *   ch3 EPWM1_B=Motor4  ch4 eCAP1  =Motor5
+#if defined(CONFIG_SCHED_CRITMONITOR) || defined(CONFIG_SCHED_IRQMONITOR)
+	/* The critical-section and IRQ monitors time with the R5 PMU cycle
+	 * counter. Nothing else starts it on this chip, so enable it here and
+	 * calibrate it against the HRT (measured 799.93 MHz on the O1).
 	 */
 	{
-		static const char *const pwm_func_names[] = {
-			"PWM_MAIN_FUNC1", "PWM_MAIN_FUNC2", "PWM_MAIN_FUNC3",
-			"PWM_MAIN_FUNC4", "PWM_MAIN_FUNC5",
-		};
+		up_perf_init((void *)1);
+		const hrt_abstime t0 = hrt_absolute_time();
+		const clock_t c0 = up_perf_gettime();
 
-		for (unsigned i = 0; i < sizeof(pwm_func_names) / sizeof(pwm_func_names[0]); i++) {
-			param_t p = param_find(pwm_func_names[i]);
+		while (hrt_absolute_time() - t0 < 20000) {}
 
-			if (p != PARAM_INVALID) {
-				int32_t func = 101 + (int32_t)i;   /* Motor 1..5 */
-				param_set_default_value(p, &func);
-			}
-		}
+		const clock_t c1 = up_perf_gettime();
+		const hrt_abstime t1 = hrt_absolute_time();
+		const unsigned long hz = (unsigned long)((uint64_t)(c1 - c0) * 1000000ull / (t1 - t0));
+		up_perf_init((void *)(uintptr_t)hz);
+		syslog(LOG_INFO, "[perf] R5 core %lu Hz\n", hz);
 	}
+#endif
+
+	/* Apply the board manifest (no-op until we describe HW variants). */
+	px4_platform_configure();
 
 #ifdef CONFIG_SPI
 	/* Bring up MCU_MCSPI0 so the SPI sensor drivers (ICM-20948, ...) can bind.
@@ -152,6 +165,24 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 	if (rptun_ret < 0) {
 		syslog(LOG_ERR, "[boot] am67_rptun_init failed (%d)\n", rptun_ret);
+	}
+#endif
+
+#ifdef CONFIG_AM67_SDHCI0
+	/* eMMC -> /dev/mmcsd0 (parameters, mission data, logs). Linux leaves
+	 * sdhci0 to the R5F (px4-r5f overlay). Without it PX4 still runs, with
+	 * parameters in RAM only. */
+	struct sdio_dev_s *sdio = am67_sdhci0_initialize();
+
+	if (sdio == NULL) {
+		syslog(LOG_ERR, "[boot] eMMC controller not available\n");
+
+	} else {
+		int mmc_ret = mmcsd_slotinitialize(0, sdio);
+
+		if (mmc_ret < 0) {
+			syslog(LOG_ERR, "[boot] eMMC init failed (%d)\n", mmc_ret);
+		}
 	}
 #endif
 

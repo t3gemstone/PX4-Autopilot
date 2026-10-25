@@ -34,6 +34,7 @@
 #include "LPS22DF.hpp"
 
 #include <drivers/device/spi.h>
+#include <px4_platform_common/log.h>
 
 /* SPI protocol address bits */
 #define DIR_READ	(1 << 7)
@@ -68,14 +69,15 @@ LPS22DF_SPI::LPS22DF_SPI(int bus, uint32_t device, int bus_frequency, spi_mode_e
 int LPS22DF_SPI::probe()
 {
 	uint8_t id = 0;
+	const int ret = read(lps22df::WHO_AM_I, &id, 1);
 
-	if (read(lps22df::WHO_AM_I, &id, 1)) {
-		DEVICE_DEBUG("read_reg fail");
+	if (ret != 0) {
+		PX4_ERR("WHO_AM_I read failed (%i)", ret);
 		return -EIO;
 	}
 
 	if (id != lps22df::WHO_AM_I_VALUE) {
-		DEVICE_DEBUG("ID byte mismatch (%02x != %02x)", lps22df::WHO_AM_I_VALUE, id);
+		PX4_WARN("WHO_AM_I 0x%02x, expected 0x%02x", id, lps22df::WHO_AM_I_VALUE);
 		return -EIO;
 	}
 
@@ -90,9 +92,10 @@ int LPS22DF_SPI::read(unsigned address, void *data, unsigned count)
 		return -EIO;
 	}
 
-	buf[0] = address | DIR_READ;
+	buf[0] = (uint8_t)(address | DIR_READ);
 
 	int ret = transfer(&buf[0], &buf[0], count + 1);
+
 	memcpy(data, &buf[1], count);
 	return ret;
 }
